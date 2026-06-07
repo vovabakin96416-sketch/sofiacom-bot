@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN", "ВСТАВЬ_СВОЙ_ТОКЕН_ЗДЕСЬ")
 
 # ─── Кулдаун ─────────────────────────────────────────────────────────────────
-COOLDOWN_HOURS = 24
+COOLDOWN_HOURS = 0
 cooldowns: dict[int, datetime] = {}   # user_id → время последнего ответа
 
 
