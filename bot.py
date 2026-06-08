@@ -43,6 +43,9 @@ COOLDOWN_HOURS = 24
 cooldowns:     dict[int, datetime]             = {}
 cooldowns_btn: dict[tuple[int, str], datetime] = {}
 
+# ─── Очередь постов на одобрение ──────────────────────────────────────────────
+pending_posts: dict[str, dict] = {}  # slot ("morning"/"evening") → post dict
+
 def is_on_cooldown(user_id: int) -> bool:
     last = cooldowns.get(user_id)
     return last is not None and datetime.now() - last < timedelta(hours=COOLDOWN_HOURS)
@@ -226,6 +229,57 @@ async def send_post(bot, channel_id: str, post: dict) -> None:
         await bot.send_message(chat_id=channel_id, text=full,
                                parse_mode="Markdown", reply_markup=keyboard)
 
+# ─── Одобрение поста: превью → администратору ────────────────────────────────
+async def request_approval(app: Application, post: dict, slot: str) -> None:
+    """Отправить предпросмотр поста администратору с кнопками одобрения."""
+    if not ADMIN_ID:
+        await send_post(app.bot, CHANNEL_ID, post)
+        return
+
+    post = dict(post)  # работаем с копией
+
+    # Получаем фото заранее, чтобы показать в превью и не делать 2 запроса к Pexels
+    if not post.get("photo_url") and post.get("pexels_query"):
+        photo_url = fetch_pexels_photo(post["pexels_query"])
+        if photo_url:
+            post["photo_url"] = photo_url
+
+    title = post.get("title", "")
+    text  = post.get("text", "")
+    cta   = post.get("cta", "")
+    itype = post.get("interactive_type", "")
+    full  = f"*{title}*\n\n{text}\n\n{cta}".strip()
+
+    caption = (
+        f"📋 *Одобри публикацию*\n\n"
+        f"{full}\n\n"
+        f"Тип: `{itype}` · Канал: {CHANNEL_ID}"
+    )[:1020]  # Telegram caption limit 1024
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Опубликовать", callback_data=f"approve_{slot}"),
+        InlineKeyboardButton("❌ Отменить",     callback_data=f"cancel_{slot}"),
+    ]])
+
+    pending_posts[slot] = post
+
+    photo_url  = post.get("photo_url")
+    photo_path = post.get("photo_path")
+
+    if photo_path and Path(photo_path).exists():
+        with open(photo_path, "rb") as f:
+            await app.bot.send_photo(chat_id=ADMIN_ID, photo=f, caption=caption,
+                                     parse_mode="Markdown", reply_markup=keyboard)
+    elif photo_url:
+        await app.bot.send_photo(chat_id=ADMIN_ID, photo=photo_url, caption=caption,
+                                 parse_mode="Markdown", reply_markup=keyboard)
+    else:
+        await app.bot.send_message(chat_id=ADMIN_ID, text=caption,
+                                   parse_mode="Markdown", reply_markup=keyboard)
+
+    logger.info(f"📋 Запрос одобрения [{slot}] отправлен администратору {ADMIN_ID}")
+
+
 # ─── Плановая отправка (APScheduler вызывает эти функции) ────────────────────
 async def scheduled_morning_post(app: Application) -> None:
     holiday = get_holiday_post()
@@ -233,15 +287,15 @@ async def scheduled_morning_post(app: Application) -> None:
     if not post:
         logger.warning("Нет поста на сегодня (утро) — пропуск")
         return
-    await send_post(app.bot, CHANNEL_ID, post)
-    logger.info(f"✅ Утренний пост → {CHANNEL_ID}")
+    await request_approval(app, post, "morning")
+    logger.info(f"📋 Утренний пост ожидает одобрения")
 
 async def scheduled_evening_post(app: Application) -> None:
     post = get_post_for_today("evening")
     if not post:
         return
-    await send_post(app.bot, CHANNEL_ID, post)
-    logger.info(f"✅ Вечерний пост → {CHANNEL_ID}")
+    await request_approval(app, post, "evening")
+    logger.info(f"📋 Вечерний пост ожидает одобрения")
 
 # ─── Команды администратора ───────────────────────────────────────────────────
 async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -370,6 +424,37 @@ async def choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     answer = choices[idx].get("answer", "🔮")
     await query.answer(answer[:200], show_alert=True)
+
+# ─── Callback: одобрение/отмена публикации поста ────────────────────────────
+async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    action, slot = query.data.split("_", 1)  # approve_morning → ("approve", "morning")
+    post = pending_posts.pop(slot, None)
+
+    async def edit_msg(text: str) -> None:
+        try:
+            await query.edit_message_caption(text, parse_mode="Markdown")
+        except Exception:
+            await query.edit_message_text(text, parse_mode="Markdown")
+
+    if action == "approve":
+        if not post:
+            await edit_msg("❌ Пост уже обработан или не найден")
+            return
+        await send_post(context.bot, CHANNEL_ID, post)
+        title = post.get("title", "—")
+        await edit_msg(f"✅ *Опубликовано!*\n\n*{title}*\nКанал: {CHANNEL_ID}")
+        logger.info(f"✅ Пост [{slot}] одобрен → {CHANNEL_ID}")
+    else:  # cancel
+        title = post.get("title", "—") if post else "—"
+        await edit_msg(f"❌ *Отменено*\n\n*{title}*")
+        logger.info(f"❌ Пост [{slot}] отменён администратором")
+
 
 # ─── Callback: кнопки предсказаний на постах канала ──────────────────────────
 async def prediction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -657,7 +742,7 @@ def main() -> None:
     # ConversationHandler — управление пулами через кнопки (только для admin)
     # Паттерн ^(?!pred_) — не захватывает кнопки предсказаний с постов
     conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_handler, pattern=r"^(?!pred_|choice_)")],
+        entry_points=[CallbackQueryHandler(button_handler, pattern=r"^(?!pred_|choice_|approve_|cancel_)")],
         states={
             WAITING_TEXT:       [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_text)],
             WAITING_DELETE_NUM: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_delete_num)],
@@ -673,6 +758,7 @@ def main() -> None:
     app.add_handler(CommandHandler("post",     cmd_post))      # немедленный пост в основной канал
     app.add_handler(CommandHandler("schedule", cmd_schedule))  # план на неделю
     # Кнопки — перехватываем ДО conv
+    app.add_handler(CallbackQueryHandler(approval_callback,   pattern=r"^(approve|cancel)_"))
     app.add_handler(CallbackQueryHandler(choice_callback,     pattern=r"^choice_"))
     app.add_handler(CallbackQueryHandler(prediction_callback, pattern=r"^pred_"))
     app.add_handler(conv)
