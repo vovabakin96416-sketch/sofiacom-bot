@@ -5,13 +5,13 @@
     "day": "monday",
     "slot": "morning",
     "time": "10:00",
-    "title": "🔮 Карта недели: к чему готовиться",
-    "text": "Новая неделя — новые подсказки от карт.\n\nВытяни карту вместе со мной: на этой неделе колода говорит об *интуиции* и *правильном моменте*.\n\nЕсли чувствуешь внутри «пора» — значит, пора. Не откладывай то, что созрело.",
+    "title": "🔮 Карта недели — Жрица",
+    "text": "Карты открыли тему этой недели.\n\n🌙 *Жрица* — интуиция, тишина, слушай себя\n\nНеделя просит замедлиться. Не гнаться за результатом — а прислушаться к тому, что уже знаешь внутри. Ответ давно есть. Просто дай ему тишину.",
     "cta": "Отметь реакцией, где сейчас нужнее эта сила:\n❤️ любовь · 💰 деньги · ⚡ энергия 👇",
     "interactive_type": "reactions",
     "reactions": ["❤️", "💰", "⚡"],
     "button": null,
-    "pexels_query": "tarot card aesthetic flatlay single tarot card candle",
+    "pexels_query": "tarot card moon mystical feminine aesthetic candle dark",
     "photo_path": null
   },
   {
@@ -26,7 +26,7 @@
     "interactive_type": "button_prediction",
     "reactions": [],
     "button": {"type": "button_love", "label": "🔮 Что он чувствует"},
-    "pexels_query": "romantic tarot cards roses aesthetic feminine",
+    "pexels_query": "romantic tarot cards roses aesthetic feminine soft light",
     "photo_path": null
   },
   {
@@ -41,7 +41,7 @@
     "interactive_type": "button_prediction",
     "reactions": [],
     "button": {"type": "button_money", "label": "💰 Денежный совет"},
-    "pexels_query": "tarot cards coins money abundance aesthetic",
+    "pexels_query": "tarot cards gold coins abundance mystical aesthetic dark",
     "photo_path": null
   },
   {
@@ -56,7 +56,7 @@
     "interactive_type": "reactions",
     "reactions": ["❤️", "🔥", "💫"],
     "button": null,
-    "pexels_query": "candle ritual mystical aesthetic meditation feminine",
+    "pexels_query": "candle flame ritual mystical dark aesthetic smoke",
     "photo_path": null
   },
   {
@@ -66,12 +66,12 @@
     "slot": "morning",
     "time": "10:00",
     "title": "🗣 Пятница: карты отвечают на твой вопрос",
-    "text": "Есть вопрос, который крутится в голове?\n\nПро отношения, деньги, решение, которое откладываешь?\n\nСегодня карты работают лично для тебя. Нажми кнопку — ответ придёт в личку.",
+    "text": "Есть вопрос, который крутится в голове?\n\nПро отношения, деньги, решение которое откладываешь?\n\nСегодня карты работают лично для тебя. Нажми кнопку — ответ придёт в личку.",
     "cta": "Нажми — карты ответят в личку 👇",
     "interactive_type": "button_prediction",
     "reactions": [],
     "button": {"type": "button_cards", "label": "🔮 Карты отвечают"},
-    "pexels_query": "tarot reading question mystical feminine aesthetic crystal",
+    "pexels_query": "tarot reading crystal ball mystical feminine dark aesthetic",
     "photo_path": null
   },
   {
@@ -86,7 +86,7 @@
     "interactive_type": "reactions",
     "reactions": ["❤️", "🌙"],
     "button": null,
-    "pexels_query": "tarot reader personal story mystical feminine aesthetic candle",
+    "pexels_query": "tarot reader woman mystical aesthetic candle hands dark",
     "photo_path": null
   },
   {
@@ -96,12 +96,12 @@
     "slot": "morning",
     "time": "10:00",
     "title": "☀️ Воскресенье: выбери карту дня",
-    "text": "Три карты лежат рубашкой вниз.\n\nКакая зовёт тебя?\n\nВыбери цифрой — ответ вечером 🌙",
-    "cta": "1️⃣ — первая · 2️⃣ — вторая · 3️⃣ — третья\n\nПроголосуй реакцией 👇",
+    "text": "Три карты лежат рубашкой вниз.\n\nЗакрой глаза на секунду — и почувствуй, какая тянет.\n\nВечером открою каждую и расскажу, что она говорит именно тебе 🌙",
+    "cta": "Выбери реакцией:\n1️⃣ — первая · 2️⃣ — вторая · 3️⃣ — третья 👇",
     "interactive_type": "vote_123",
     "reactions": ["1️⃣", "2️⃣", "3️⃣"],
     "button": null,
-    "pexels_query": "three tarot cards face down choice mystical feminine",
+    "pexels_query": "three tarot cards face down choice mystical dark feminine",
     "photo_path": null
   },
   {
@@ -110,13 +110,13 @@
     "day": "sunday",
     "slot": "evening",
     "time": "20:00",
-    "title": "🌙 Раскрываю карты: ответы для каждой",
-    "text": "Вечер — время раскрыть карты 🌙\n\n*1️⃣ Если ты выбрала первую:*\n🌸 Императрица — день про заботу о себе. Порадуй себя чем-то маленьким сегодня.\n\n*2️⃣ Если вторую:*\n⭐ Звезда — надежда и вера. Что-то, в чём ты сомневалась, движется в нужном направлении.\n\n*3️⃣ Если третью:*\n☀️ Солнце — ясность и радость. Позволь себе быть счастливой прямо сейчас — без повода.",
+    "title": "🌙 Раскрываю карты: ответ для каждой",
+    "text": "Вечер — время раскрыть карты 🌙\n\n*1️⃣ Если ты выбрала первую:*\n🌸 *Императрица* — неделя про заботу о себе и изобилие. Порадуй себя чем-то маленьким — ты это заслужила.\n\n*2️⃣ Если вторую:*\n⭐ *Звезда* — надежда и вера. Что-то, в чём ты сомневалась, движется в нужном направлении.\n\n*3️⃣ Если третью:*\n☀️ *Солнце* — ясность и радость. Позволь себе быть счастливой прямо сейчас, без повода.",
     "cta": "❤️ если совпало · 🌙 если хочешь больше таких практик",
     "interactive_type": "reactions",
     "reactions": ["❤️", "🌙"],
     "button": null,
-    "pexels_query": "tarot cards reveal mystical feminine night candle glow",
+    "pexels_query": "tarot cards three reveal night candle glow mystical",
     "photo_path": null
   }
 ]

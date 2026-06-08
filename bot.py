@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, date
 from pathlib import Path
 
 import pytz
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, MessageHandler, CommandHandler,
@@ -168,6 +169,25 @@ def get_holiday_post() -> dict | None:
             return h.get("post")
     return None
 
+# ─── Pexels: получить URL фото по запросу ────────────────────────────────────
+def fetch_pexels_photo(query: str) -> str | None:
+    api_key = os.getenv("PEXELS_API_KEY")
+    if not api_key:
+        return None
+    try:
+        resp = requests.get(
+            "https://api.pexels.com/v1/search",
+            headers={"Authorization": api_key},
+            params={"query": query, "per_page": 15, "orientation": "portrait"},
+            timeout=8,
+        )
+        photos = resp.json().get("photos", [])
+        if photos:
+            return random.choice(photos)["src"]["large"]
+    except Exception as e:
+        logger.warning(f"Pexels error: {e}")
+    return None
+
 # ─── Отправка поста в канал ───────────────────────────────────────────────────
 async def send_post(bot, channel_id: str, post: dict) -> None:
     title = post.get("title", "")
@@ -182,11 +202,19 @@ async def send_post(bot, channel_id: str, post: dict) -> None:
             InlineKeyboardButton(btn["label"], callback_data=f"pred_{btn['type']}")
         ]])
 
-    photo = post.get("photo_path")
-    if photo and Path(photo).exists():
-        with open(photo, "rb") as f:
+    # Приоритет: локальный файл → photo_url из json → Pexels по запросу
+    photo_path = post.get("photo_path")
+    photo_url  = post.get("photo_url") or (
+        fetch_pexels_photo(post["pexels_query"]) if post.get("pexels_query") else None
+    )
+
+    if photo_path and Path(photo_path).exists():
+        with open(photo_path, "rb") as f:
             await bot.send_photo(chat_id=channel_id, photo=f, caption=full,
                                  parse_mode="Markdown", reply_markup=keyboard)
+    elif photo_url:
+        await bot.send_photo(chat_id=channel_id, photo=photo_url, caption=full,
+                             parse_mode="Markdown", reply_markup=keyboard)
     else:
         await bot.send_message(chat_id=channel_id, text=full,
                                parse_mode="Markdown", reply_markup=keyboard)
