@@ -1,27 +1,26 @@
 """
-Бот Софии — отвечает в комментариях на КАРТА / КОФЕ / РУНА
-Тексты хранятся в texts.json — редактируются прямо из Telegram, GitHub не нужен.
-
-Запуск локально: python bot.py
-Деплой: Koyeb (бесплатно, см. ИНСТРУКЦИЯ-запуск.md)
+Бот Софии — отвечает на КАРТА / КОФЕ / РУНА в комментариях.
+Управление через кнопки: /menu в личке боту.
 """
 
-import os
-import re
-import json
-import random
-import logging
+import os, re, json, random, logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from telegram import Update
-from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, MessageHandler, CommandHandler,
+    CallbackQueryHandler, ConversationHandler, filters, ContextTypes
+)
 
 logging.basicConfig(format="%(asctime)s | %(levelname)s | %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN  = os.getenv("BOT_TOKEN", "ВСТАВЬ_ТОКЕН_ЗДЕСЬ")
-ADMIN_ID   = int(os.getenv("ADMIN_ID", "0"))   # твой Telegram user_id (узнай у @userinfobot)
+ADMIN_ID   = int(os.getenv("ADMIN_ID", "0"))
 TEXTS_FILE = Path("texts.json")
+
+# ─── Состояния диалога ────────────────────────────────────────────────────────
+WAITING_TEXT, WAITING_DELETE_NUM = range(2)
 
 # ─── Кулдаун ──────────────────────────────────────────────────────────────────
 COOLDOWN_HOURS = 24
@@ -31,12 +30,14 @@ def is_on_cooldown(user_id: int) -> bool:
     last = cooldowns.get(user_id)
     return last is not None and datetime.now() - last < timedelta(hours=COOLDOWN_HOURS)
 
-# ─── Паттерны (ловят опечатки, регистр, повторы букв) ────────────────────────
+# ─── Паттерны ────────────────────────────────────────────────────────────────
 KARTA = re.compile(r"^\s*к+а+р+т[аы]?[!?.,…]?\s*$", re.IGNORECASE)
 KOFE  = re.compile(r"^\s*к+о+ф+[её][!?.,…]?\s*$",   re.IGNORECASE)
 RUNA  = re.compile(r"^\s*р+у+н[аы]?[!?.,…]?\s*$",   re.IGNORECASE)
 
-# ─── Тексты по умолчанию (при первом запуске сохранятся в texts.json) ─────────
+KEY_LABELS = {"karta": "🎴 Карта", "kofe": "☕ Кофе", "runa": "🌿 Руна"}
+
+# ─── Тексты по умолчанию ──────────────────────────────────────────────────────
 DEFAULT_TEXTS = {
     "karta": [
         "🎴 {name}, тяну твою карту...\n\n✨ Сегодня колода говорит: доверься тому, что чувствуешь, а не тому, что «надо».\nДень просит честности с собой — там, где ты давно знаешь ответ, но откладываешь.\n\nКак тебе? 🙂 Хочешь подробнее — напиши в личку слово КАРТА 🔮",
@@ -52,15 +53,15 @@ DEFAULT_TEXTS = {
         "☕ {name}, читаю кофейную гущу...\n\nНа дне — круг. Цикл завершается, готовься к новому витку.\nВижу ещё: беспокойство вокруг денег уходит — но медленно, не форсируй.\n\nРезонирует? 🌙",
         "☕ {name}, заглядываю в чашку...\n\nОсадок говорит о дороге — скорее всего не физической, а внутренней.\nИ о встрече. Кто-то войдёт в твою жизнь или напомнит о себе в ближайшие дни.\n\nЖдёшь кого-то? 💫",
         "☕ {name}, гуща раскрывается...\n\nВижу птицу — это свобода от чего-то, что давно держало.\nВремя принять решение, которое ты откладывала. Момент подходящий.\n\nУгадала? ☕",
-        "☕ {name}, смотрю внимательно...\n\nНа дне — сердце. Отношения в фокусе сегодня: либо потеплеет, либо прояснится.\nГлавное — говори прямо, не обиняками. Тебя поймут.\n\nКак с этим сейчас? 💗",
+        "☕ {name}, смотрю внимательно...\n\nНа дне — сердце. Отношения в фокусе сегодня: либо потеплеет, либо прояснится.\nГлавное — говори прямо. Тебя поймут.\n\nКак с этим сейчас? 💗",
     ],
     "runa": [
-        "🌿 {name}, тяну рунное послание...\n\n⚡ Выпала Тейваз — руна воина и направления.\nТвоя сила сегодня в ясности намерения. Иди туда, куда ведёт внутренний компас — не оглядывайся.\n\nРезонирует? 🌿",
-        "🌿 {name}, руна брошена...\n\n🌊 Выпала Лагуз — руна потока и интуиции.\nСегодня не день для логики. Доверься чувствам — они точнее любых расчётов.\n\nКак тебе такое послание? ✨",
+        "🌿 {name}, тяну рунное послание...\n\n⚡ Выпала Тейваз — руна воина и направления.\nТвоя сила сегодня в ясности намерения. Иди туда, куда ведёт внутренний компас.\n\nРезонирует? 🌿",
+        "🌿 {name}, руна брошена...\n\n🌊 Выпала Лагуз — руна потока и интуиции.\nСегодня не день для логики. Доверься чувствам — они точнее любых расчётов.\n\nКак тебе? ✨",
         "🌿 {name}, руна для тебя...\n\n☀️ Выпала Соулу — руна солнца и победы.\nЭнергия сейчас высокая. Начинай то, что откладывал(а) — момент благоприятный.\n\nСовпало с ощущениями? 💫",
-        "🌿 {name}, послание рун...\n\n🌱 Выпала Беркана — руна роста и нового начала.\nЧто-то новое хочет прорасти в твоей жизни. Дай этому пространство и время.\n\nЧто прорастает у тебя сейчас? 🌿",
-        "🌿 {name}, руны говорят...\n\n🛡️ Выпала Альгиз — руна защиты.\nСегодня твоё поле сильное. Можешь спокойно двигаться вперёд — ты под защитой.\n\nЧувствуешь эту опору? ✨",
-        "🌿 {name}, тяну руну...\n\n🔄 Выпала Эваз — руна движения и изменений.\nЧто-то приходит в движение. Не сопротивляйся переменам — они в твою пользу.\n\nЧто сейчас меняется в твоей жизни? 💫",
+        "🌿 {name}, послание рун...\n\n🌱 Выпала Беркана — руна роста и нового начала.\nЧто-то новое хочет прорасти в твоей жизни. Дай этому пространство.\n\nЧто прорастает у тебя сейчас? 🌿",
+        "🌿 {name}, руны говорят...\n\n🛡️ Выпала Альгиз — руна защиты.\nСегодня твоё поле сильное. Двигайся вперёд — ты под защитой.\n\nЧувствуешь эту опору? ✨",
+        "🌿 {name}, тяну руну...\n\n🔄 Выпала Эваз — руна движения и изменений.\nЧто-то приходит в движение. Не сопротивляйся переменам — они в твою пользу.\n\nЧто сейчас меняется? 💫",
     ],
 }
 
@@ -74,10 +75,196 @@ def load_texts() -> dict:
 def save_texts(data: dict) -> None:
     TEXTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-# ─── Ответ на триггер ─────────────────────────────────────────────────────────
+# ─── Клавиатуры ──────────────────────────────────────────────────────────────
+def main_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎴 Карта",  callback_data="menu_karta"),
+            InlineKeyboardButton("☕ Кофе",   callback_data="menu_kofe"),
+            InlineKeyboardButton("🌿 Руна",   callback_data="menu_runa"),
+        ],
+    ])
+
+def key_menu_keyboard(key: str) -> InlineKeyboardMarkup:
+    label = KEY_LABELS[key]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"📋 Показать все тексты",    callback_data=f"list_{key}")],
+        [InlineKeyboardButton(f"➕ Добавить предсказание",  callback_data=f"add_{key}")],
+        [InlineKeyboardButton(f"🗑 Удалить предсказание",   callback_data=f"del_{key}")],
+        [InlineKeyboardButton("◀️ Назад",                   callback_data="back_main")],
+    ])
+
+def back_keyboard(key: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("◀️ Назад",  callback_data=f"menu_{key}")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="back_main")],
+    ])
+
+# ─── Главное меню ─────────────────────────────────────────────────────────────
+async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Нет доступа.")
+        return
+    await update.message.reply_text(
+        "🎛 *Панель управления*\n\nВыбери тип предсказания:",
+        parse_mode="Markdown",
+        reply_markup=main_menu_keyboard()
+    )
+
+# ─── Обработчик кнопок ────────────────────────────────────────────────────────
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    if update.effective_user.id != ADMIN_ID:
+        await query.edit_message_text("❌ Нет доступа.")
+        return ConversationHandler.END
+
+    data = query.data
+
+    # Главное меню
+    if data == "back_main":
+        await query.edit_message_text(
+            "🎛 *Панель управления*\n\nВыбери тип предсказания:",
+            parse_mode="Markdown",
+            reply_markup=main_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    # Меню конкретного типа
+    if data.startswith("menu_"):
+        key = data[5:]
+        count = len(load_texts().get(key, []))
+        await query.edit_message_text(
+            f"{KEY_LABELS[key]}\n\nСейчас в пуле: *{count}* предсказаний\n\nЧто хочешь сделать?",
+            parse_mode="Markdown",
+            reply_markup=key_menu_keyboard(key)
+        )
+        return ConversationHandler.END
+
+    # Показать список
+    if data.startswith("list_"):
+        key = data[5:]
+        texts = load_texts().get(key, [])
+        if not texts:
+            await query.edit_message_text(
+                f"Пул {KEY_LABELS[key]} пуст.",
+                reply_markup=back_keyboard(key)
+            )
+            return ConversationHandler.END
+
+        lines = [f"📋 {KEY_LABELS[key]} — {len(texts)} предсказаний:\n"]
+        for i, t in enumerate(texts, 1):
+            preview = t[:70].replace("\n", " ")
+            lines.append(f"{i}. {preview}…")
+        await query.edit_message_text(
+            "\n".join(lines),
+            reply_markup=back_keyboard(key)
+        )
+        return ConversationHandler.END
+
+    # Добавить текст — запрашиваем ввод
+    if data.startswith("add_"):
+        key = data[4:]
+        context.user_data["add_key"] = key
+        await query.edit_message_text(
+            f"➕ *Добавление в {KEY_LABELS[key]}*\n\n"
+            f"Напиши текст нового предсказания.\n\n"
+            f"💡 `{{name}}` заменится на имя пользователя автоматически.\n\n"
+            f"Отправь /cancel чтобы отменить.",
+            parse_mode="Markdown"
+        )
+        return WAITING_TEXT
+
+    # Удалить — запрашиваем номер
+    if data.startswith("del_"):
+        key = data[4:]
+        texts = load_texts().get(key, [])
+        if not texts:
+            await query.edit_message_text(
+                f"Пул {KEY_LABELS[key]} пуст — удалять нечего.",
+                reply_markup=back_keyboard(key)
+            )
+            return ConversationHandler.END
+
+        context.user_data["del_key"] = key
+        lines = [f"🗑 *Удаление из {KEY_LABELS[key]}*\n\nКакой номер удалить?\n"]
+        for i, t in enumerate(texts, 1):
+            preview = t[:60].replace("\n", " ")
+            lines.append(f"{i}. {preview}…")
+        lines.append("\nНапиши номер или /cancel для отмены.")
+        await query.edit_message_text("\n".join(lines), parse_mode="Markdown")
+        return WAITING_DELETE_NUM
+
+    return ConversationHandler.END
+
+# ─── Получить текст нового предсказания ───────────────────────────────────────
+async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if update.effective_user.id != ADMIN_ID:
+        return ConversationHandler.END
+
+    key = context.user_data.get("add_key")
+    new_text = update.message.text.strip()
+
+    data = load_texts()
+    data[key].append(new_text)
+    save_texts(data)
+
+    await update.message.reply_text(
+        f"✅ Добавлено в {KEY_LABELS[key]}!\nТеперь в пуле: *{len(data[key])}* предсказаний.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton(f"◀️ К {KEY_LABELS[key]}", callback_data=f"menu_{key}"),
+            InlineKeyboardButton("🏠 Меню", callback_data="back_main"),
+        ]])
+    )
+    return ConversationHandler.END
+
+# ─── Получить номер для удаления ──────────────────────────────────────────────
+async def receive_delete_num(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if update.effective_user.id != ADMIN_ID:
+        return ConversationHandler.END
+
+    key = context.user_data.get("del_key")
+    try:
+        idx = int(update.message.text.strip()) - 1
+    except ValueError:
+        await update.message.reply_text("Напиши просто число, например: 3")
+        return WAITING_DELETE_NUM
+
+    data = load_texts()
+    pool = data.get(key, [])
+    if idx < 0 or idx >= len(pool):
+        await update.message.reply_text(f"Нет номера {idx+1}. Всего в пуле: {len(pool)}. Попробуй ещё.")
+        return WAITING_DELETE_NUM
+
+    removed = pool.pop(idx)
+    save_texts(data)
+    preview = removed[:60].replace("\n", " ")
+
+    await update.message.reply_text(
+        f"🗑 Удалено:\n«{preview}…»\n\nОсталось в пуле: *{len(pool)}*",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton(f"◀️ К {KEY_LABELS[key]}", callback_data=f"menu_{key}"),
+            InlineKeyboardButton("🏠 Меню", callback_data="back_main"),
+        ]])
+    )
+    return ConversationHandler.END
+
+# ─── Отмена ───────────────────────────────────────────────────────────────────
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("Отменено.", reply_markup=main_menu_keyboard())
+    return ConversationHandler.END
+
+# ─── Ответ в комментариях ─────────────────────────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.message
     if not msg or not msg.text:
+        return
+
+    # В личке для админа — только меню, не отвечаем на триггеры
+    if update.effective_chat.type == "private":
         return
 
     text = msg.text.strip()
@@ -90,7 +277,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else: return
 
     if is_on_cooldown(user.id):
-        logger.info(f"Кулдаун: {name}")
         return
 
     pool = load_texts().get(key, [])
@@ -100,131 +286,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     cooldowns[user.id] = datetime.now()
     response = random.choice(pool).replace("{name}", name)
     await msg.reply_text(response)
-    logger.info(f"Ответил {name} | триггер: {key}")
+    logger.info(f"Ответил {name} | {key}")
 
-# ─── Админ-команды (только для ADMIN_ID) ──────────────────────────────────────
-def admin_only(func):
-    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if update.effective_user.id != ADMIN_ID:
-            await update.message.reply_text("❌ Нет доступа.")
-            return
-        await func(update, context)
-    return wrapper
-
-@admin_only
-async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    /list karta|kofe|runa — показать все тексты с номерами
-    """
-    args = context.args
-    if not args or args[0] not in ("karta", "kofe", "runa"):
-        await update.message.reply_text("Использование: /list karta  или /list kofe  или /list runa")
-        return
-
-    key = args[0]
-    texts = load_texts().get(key, [])
-    if not texts:
-        await update.message.reply_text(f"Пул «{key}» пуст.")
-        return
-
-    lines = [f"📋 Пул «{key}» — {len(texts)} текстов:\n"]
-    for i, t in enumerate(texts, 1):
-        preview = t[:80].replace("\n", " ")
-        lines.append(f"{i}. {preview}...")
-
-    await update.message.reply_text("\n".join(lines))
-
-@admin_only
-async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    /addkarta Текст нового предсказания...
-    /addkofe  Текст нового предсказания...
-    /addruna  Текст нового предсказания...
-    """
-    cmd = update.message.text.split()[0].lstrip("/").lower()  # addkarta / addkofe / addruna
-    key_map = {"addkarta": "karta", "addkofe": "kofe", "addruna": "runa"}
-    key = key_map.get(cmd)
-
-    if not key:
-        await update.message.reply_text("Неизвестная команда.")
-        return
-
-    new_text = update.message.text.partition(" ")[2].strip()
-    if not new_text:
-        await update.message.reply_text(f"Напиши текст после /{cmd}")
-        return
-
-    data = load_texts()
-    data[key].append(new_text)
-    save_texts(data)
-    await update.message.reply_text(f"✅ Добавлено в пул «{key}». Теперь {len(data[key])} текстов.")
-
-@admin_only
-async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    /delete karta 3 — удалить текст №3 из пула «karta»
-    """
-    args = context.args
-    if len(args) < 2 or args[0] not in ("karta", "kofe", "runa"):
-        await update.message.reply_text("Использование: /delete karta 3\n(сначала /list karta чтобы узнать номер)")
-        return
-
-    key = args[0]
-    try:
-        idx = int(args[1]) - 1
-    except ValueError:
-        await update.message.reply_text("Номер должен быть числом.")
-        return
-
-    data = load_texts()
-    pool = data.get(key, [])
-    if idx < 0 or idx >= len(pool):
-        await update.message.reply_text(f"Нет текста с номером {idx+1}. Всего в пуле: {len(pool)}.")
-        return
-
-    removed = pool.pop(idx)
-    save_texts(data)
-    preview = removed[:60].replace("\n", " ")
-    await update.message.reply_text(f"🗑 Удалён текст №{idx+1}:\n«{preview}...»\nОсталось: {len(pool)}")
-
-@admin_only
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "🔧 Команды управления ботом:\n\n"
-        "/list karta — показать все тексты для КАРТА\n"
-        "/list kofe  — показать все тексты для КОФЕ\n"
-        "/list runa  — показать все тексты для РУНА\n\n"
-        "/addkarta Текст... — добавить текст в пул КАРТА\n"
-        "/addkofe Текст...  — добавить текст в пул КОФЕ\n"
-        "/addruna Текст...  — добавить текст в пул РУНА\n\n"
-        "/delete karta 3 — удалить текст №3 из пула КАРТА\n\n"
-        "💡 {name} в тексте заменяется на ник пользователя автоматически."
-    )
-
-# ─── Запуск ──────────────────────────────────────────────────────────────────
+# ─── Запуск ───────────────────────────────────────────────────────────────────
 def main() -> None:
     if BOT_TOKEN == "ВСТАВЬ_ТОКЕН_ЗДЕСЬ":
-        logger.error("Токен не задан! Укажи BOT_TOKEN в переменной окружения.")
+        logger.error("Токен не задан!")
         return
-    if ADMIN_ID == 0:
-        logger.warning("ADMIN_ID не задан — команды /add, /delete, /list работать не будут.")
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Триггеры в комментах
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # ConversationHandler для управления текстами через кнопки
+    conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(button_handler)],
+        states={
+            WAITING_TEXT:       [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_text)],
+            WAITING_DELETE_NUM: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_delete_num)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
+    )
 
-    # Админ-команды
-    app.add_handler(CommandHandler("list",     cmd_list))
-    app.add_handler(CommandHandler("addkarta", cmd_add))
-    app.add_handler(CommandHandler("addkofe",  cmd_add))
-    app.add_handler(CommandHandler("addruna",  cmd_add))
-    app.add_handler(CommandHandler("delete",   cmd_delete))
-    app.add_handler(CommandHandler("help",     cmd_help))
+    app.add_handler(CommandHandler("menu", cmd_menu))
+    app.add_handler(CommandHandler("start", cmd_menu))   # /start тоже открывает меню
+    app.add_handler(conv)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("Бот запущен ✅")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
-
