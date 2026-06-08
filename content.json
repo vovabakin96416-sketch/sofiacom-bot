@@ -10,7 +10,11 @@
     "cta": "Отметь реакцией ❤️💰⚡ — или напиши *«карта»* в комментариях, и я пришлю тебе личное послание от карт 🔮",
     "interactive_type": "keyword_trigger",
     "keyword": "карта",
-    "reactions": ["❤️", "💰", "⚡"],
+    "reactions": [
+      "❤️",
+      "💰",
+      "⚡"
+    ],
     "choices": null,
     "button": null,
     "pexels_query": "tarot card moon mystical feminine aesthetic candle dark",
@@ -87,7 +91,11 @@
     "cta": "Напиши *«руна»* в комментариях — пришлю тебе рунное послание на сегодня 🌿",
     "interactive_type": "keyword_trigger",
     "keyword": "руна",
-    "reactions": ["❤️", "🌿", "✨"],
+    "reactions": [
+      "❤️",
+      "🌿",
+      "✨"
+    ],
     "choices": null,
     "button": null,
     "pexels_query": "runes stones mystical dark aesthetic candle ancient symbols",
@@ -106,7 +114,10 @@
     "keyword": null,
     "reactions": [],
     "choices": null,
-    "button": {"type": "button_cards", "label": "🔮 Карты отвечают"},
+    "button": {
+      "type": "button_cards",
+      "label": "🔮 Карты отвечают"
+    },
     "pexels_query": "tarot reading crystal ball mystical feminine dark aesthetic",
     "photo_path": null
   },
@@ -121,7 +132,11 @@
     "cta": "Напиши *«кофе»* в комментариях — и я прочитаю твою чашку 🔮☕",
     "interactive_type": "keyword_trigger",
     "keyword": "кофе",
-    "reactions": ["❤️", "☕", "🌙"],
+    "reactions": [
+      "❤️",
+      "☕",
+      "🌙"
+    ],
     "choices": null,
     "button": null,
     "pexels_query": "coffee cup fortune telling mystical dark aesthetic candle",
@@ -135,10 +150,14 @@
     "time": "10:00",
     "title": "☀️ Воскресенье: выбери карту дня",
     "text": "Три карты лежат рубашкой вниз.\n\nЗакрой глаза на секунду — и почувствуй, какая тянет.\n\nВечером открою каждую и расскажу, что она говорит именно тебе 🌙",
-    "cta": "Выбери реакцией:\n1️⃣ — первая · 2️⃣ — вторая · 3️⃣ — третья 👇",
+    "cta": "Выбери реакцией:\n❤️ — первая · 🔥 — вторая · ✨ — третья 👇",
     "interactive_type": "vote_123",
     "keyword": null,
-    "reactions": ["1️⃣", "2️⃣", "3️⃣"],
+    "reactions": [
+      "❤️",
+      "🔥",
+      "✨"
+    ],
     "choices": null,
     "button": null,
     "pexels_query": "three tarot cards face down choice mystical dark feminine",
@@ -151,11 +170,14 @@
     "slot": "evening",
     "time": "20:00",
     "title": "🌙 Раскрываю карты: ответ для каждой",
-    "text": "Вечер — время раскрыть карты 🌙\n\n*1️⃣ Если ты выбрала первую:*\n🌸 *Императрица* — неделя про заботу о себе и изобилие. Порадуй себя чем-то маленьким — ты это заслужила.\n\n*2️⃣ Если вторую:*\n⭐ *Звезда* — надежда и вера. Что-то, в чём ты сомневалась, движется в нужном направлении.\n\n*3️⃣ Если третью:*\n☀️ *Солнце* — ясность и радость. Позволь себе быть счастливой прямо сейчас, без повода.",
+    "text": "Вечер — время раскрыть карты 🌙\n\n❤️ *Если выбрала первую:*\n🌸 *Императрица* — неделя про заботу о себе и изобилие. Порадуй себя чем-то маленьким — ты это заслужила.\n\n🔥 *Если вторую:*\n⭐ *Звезда* — надежда и вера. Что-то, в чём ты сомневалась, движется в нужном направлении.\n\n✨ *Если третью:*\n☀️ *Солнце* — ясность и радость. Позволь себе быть счастливой прямо сейчас, без повода.",
     "cta": "❤️ если совпало · 🌙 если хочешь больше таких практик\n\nИли напиши *«карта»* — и получи личное послание на следующую неделю 🔮",
     "interactive_type": "keyword_trigger",
     "keyword": "карта",
-    "reactions": ["❤️", "🌙"],
+    "reactions": [
+      "❤️",
+      "🌙"
+    ],
     "choices": null,
     "button": null,
     "pexels_query": "tarot cards three reveal night candle glow mystical",

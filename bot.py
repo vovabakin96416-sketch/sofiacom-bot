@@ -59,6 +59,22 @@ KARTA = re.compile(r"^\s*к+а+р+т[аы]?[!?.,…]?\s*$", re.IGNORECASE)
 KOFE  = re.compile(r"^\s*к+о+ф+[её][!?.,…]?\s*$",   re.IGNORECASE)
 RUNA  = re.compile(r"^\s*р+у+н[аы]?[!?.,…]?\s*$",   re.IGNORECASE)
 
+# Названия карт Таро и рун → попадают в пул «карта»
+CARD_NAME = re.compile(
+    r"^\s*("
+    # Старшие арканы
+    r"жрица|маг|дурак|шут|императрица|император|иерофант|влюблённые?|влюбленные?"
+    r"|колесница|сила|отшельник|колесо|колесо фортуны|справедливость"
+    r"|повешенный|смерть|умеренность|дьявол|башня|звезда|луна|солнце|суд|мир"
+    # Таро в целом
+    r"|таро|тарот"
+    # Руны (популярные)
+    r"|феху|уруз|турисаз|ансуз|райдо|кано|гебо|вуньо|хагалаз|наутиз|иса|йера"
+    r"|эйваз|перт|альгиз|соулу|тейваз|беркана|эваз|манназ|лагуз|ингуз|дагаз|отала"
+    r")[!?.,…]?\s*$",
+    re.IGNORECASE
+)
+
 KEY_LABELS = {
     "karta":         "🎴 Карта",
     "kofe":          "☕ Кофе",
@@ -696,9 +712,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user = msg.from_user
     name = f"@{user.username}" if user.username else user.first_name
 
-    if   KARTA.match(text): key = "karta"
-    elif KOFE.match(text):  key = "kofe"
-    elif RUNA.match(text):  key = "runa"
+    if   KARTA.match(text):     key = "karta"
+    elif KOFE.match(text):      key = "kofe"
+    elif RUNA.match(text):      key = "runa"
+    elif CARD_NAME.match(text): key = "karta"  # жрица, солнце, луна и др. → карточный пул
     else: return
 
     if is_on_cooldown(user.id):
