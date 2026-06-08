@@ -315,12 +315,16 @@ async def prediction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ─── Клавиатуры меню ─────────────────────────────────────────────────────────
 def main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🎴 Карта", callback_data="menu_karta"),
-            InlineKeyboardButton("☕ Кофе",  callback_data="menu_kofe"),
-            InlineKeyboardButton("🌿 Руна",  callback_data="menu_runa"),
-        ],
-        [InlineKeyboardButton("💫 Тексты кнопок", callback_data="menu_btns")],
+        [InlineKeyboardButton("💬 Триггеры в комментах (карта/кофе/руна)", callback_data="menu_triggers")],
+        [InlineKeyboardButton("💫 Кнопки на постах (любовь/деньги/карты)", callback_data="menu_btns")],
+    ])
+
+def triggers_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎴 «карта» — ответы на слово карта", callback_data="menu_karta")],
+        [InlineKeyboardButton("☕ «кофе» — ответы на слово кофе",  callback_data="menu_kofe")],
+        [InlineKeyboardButton("🌿 «руна» — ответы на слово руна",  callback_data="menu_runa")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="back_main")],
     ])
 
 def btn_texts_keyboard() -> InlineKeyboardMarkup:
@@ -332,7 +336,7 @@ def btn_texts_keyboard() -> InlineKeyboardMarkup:
     ])
 
 def key_menu_keyboard(key: str) -> InlineKeyboardMarkup:
-    back_cb = "menu_btns" if key.startswith("button_") else "back_main"
+    back_cb = "menu_btns" if key.startswith("button_") else "menu_triggers"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📋 Показать все тексты",   callback_data=f"list_{key}")],
         [InlineKeyboardButton("➕ Добавить предсказание", callback_data=f"add_{key}")],
@@ -341,7 +345,10 @@ def key_menu_keyboard(key: str) -> InlineKeyboardMarkup:
     ])
 
 def back_keyboard(key: str) -> InlineKeyboardMarkup:
-    back_cb = "menu_btns" if key.startswith("button_") else f"menu_{key}"
+    if key.startswith("button_"):
+        back_cb = "menu_btns"
+    else:
+        back_cb = "menu_triggers"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("◀️ Назад",        callback_data=back_cb)],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="back_main")],
@@ -353,7 +360,10 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("❌ Нет доступа.")
         return
     await update.message.reply_text(
-        "🎛 *Панель управления*\n\nВыбери раздел:",
+        "🎛 *Панель управления*\n\n"
+        "💬 *Триггеры* — тексты, которые бот пишет в ответ на слова в комментах (карта / кофе / руна)\n"
+        "💫 *Кнопки* — тексты, которые бот шлёт в личку когда подписчик жмёт кнопку в посте\n\n"
+        "Выбери раздел:",
         parse_mode="Markdown",
         reply_markup=main_menu_keyboard()
     )
@@ -377,9 +387,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return ConversationHandler.END
 
+    if data == "menu_triggers":
+        await query.edit_message_text(
+            "💬 *Триггеры в комментах*\n\n"
+            "Когда подписчик пишет слово в комментах — бот отвечает случайным текстом из пула.\n\n"
+            "Выбери слово чтобы управлять пулом текстов:",
+            parse_mode="Markdown",
+            reply_markup=triggers_keyboard()
+        )
+        return ConversationHandler.END
+
     if data == "menu_btns":
         await query.edit_message_text(
-            "💫 *Тексты кнопок*\n\nВыбери тип кнопки:",
+            "💫 *Кнопки на постах*\n\n"
+            "Когда подписчик нажимает кнопку в посте канала — бот шлёт ему предсказание в личку.\n\n"
+            "Выбери тип кнопки чтобы управлять пулом текстов:",
             parse_mode="Markdown",
             reply_markup=btn_texts_keyboard()
         )
