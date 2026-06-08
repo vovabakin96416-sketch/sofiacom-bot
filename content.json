@@ -10,6 +10,7 @@
     "cta": "Отметь реакцией, где сейчас нужнее эта сила:\n❤️ любовь · 💰 деньги · ⚡ энергия 👇",
     "interactive_type": "reactions",
     "reactions": ["❤️", "💰", "⚡"],
+    "choices": null,
     "button": null,
     "pexels_query": "tarot card moon mystical feminine aesthetic candle dark",
     "photo_path": null
@@ -20,13 +21,27 @@
     "day": "tuesday",
     "slot": "morning",
     "time": "10:00",
-    "title": "💔 Любовь: почему он молчит",
-    "text": "Он не пишет — и ты снова ищешь ответ.\n\nКарты говорят: молчание мужчины почти никогда не значит равнодушие. Чаще — страх. Страх быть отвергнутым, страх показаться слабым, страх потерять контроль над ситуацией.\n\nЕсли внутри тихо — значит, пора дать ему пространство. Именно тогда он приходит.",
-    "cta": "❤️ если знакомо · 💬 если хочешь разобраться в своей ситуации",
-    "interactive_type": "reactions",
-    "reactions": ["❤️", "💬"],
+    "title": "💔 Любовь: что скрывают карты",
+    "text": "Карты говорят — у каждой ситуации свой ответ.\n\nВыбери то, что ближе к тебе прямо сейчас — и узнай, что говорят карты именно о твоём случае 👇",
+    "cta": "Нажми на свой вариант — ответ появится мгновенно",
+    "interactive_type": "button_choice",
+    "reactions": [],
+    "choices": [
+      {
+        "label": "❤️ Он молчит",
+        "answer": "Молчание — не уход. Он в своих мыслях. Дай пространство — и он сделает шаг первым. Твоё спокойствие сейчас притягивает его."
+      },
+      {
+        "label": "💔 Отношения застыли",
+        "answer": "Застой — не конец. Это точка выбора для вас обоих. Один честный разговор сдвинет всё. Карты видят потенциал."
+      },
+      {
+        "label": "🌹 Хочу новых отношений",
+        "answer": "Ты готова — карты это видят. Но сначала отпусти прошлое. Новое не войдёт, пока старое занимает место в сердце."
+      }
+    ],
     "button": null,
-    "pexels_query": "romantic tarot cards roses aesthetic feminine soft light candle",
+    "pexels_query": "romantic tarot cards roses aesthetic feminine soft candlelight dark",
     "photo_path": null
   },
   {
@@ -35,11 +50,25 @@
     "day": "wednesday",
     "slot": "morning",
     "time": "10:00",
-    "title": "💰 Деньги: что блокирует достаток",
-    "text": "Почему деньги уходят быстрее, чем приходят?\n\nКарты видят три причины:\n\n1️⃣ Ты не веришь, что достойна большего\n2️⃣ Есть трата или обязательство, которое тянет вниз\n3️⃣ Ты ждёшь «нужного момента» вместо того, чтобы действовать\n\nКакая откликнулась?",
-    "cta": "1️⃣ первая · 2️⃣ вторая · 3️⃣ третья 👇",
-    "interactive_type": "vote_123",
-    "reactions": ["1️⃣", "2️⃣", "3️⃣"],
+    "title": "💰 Деньги: найди свой блок",
+    "text": "Карты видят три причины, по которым деньги не задерживаются.\n\nКакая из них ближе к тебе сейчас? Выбери — и карты дадут совет именно под твою ситуацию 👇",
+    "cta": "Нажми на свой вариант — совет появится мгновенно",
+    "interactive_type": "button_choice",
+    "reactions": [],
+    "choices": [
+      {
+        "label": "💸 Деньги утекают",
+        "answer": "Вижу утечку. Есть трата или обязательство, которое тянет вниз. Найди и реши её — это освободит денежный поток."
+      },
+      {
+        "label": "🔒 Деньги не идут",
+        "answer": "Блок внутри. Ты не веришь, что достойна большего. Скажи вслух сегодня: «Я принимаю достаток». Это начало сдвига."
+      },
+      {
+        "label": "😴 Деньги в застое",
+        "answer": "Нужно движение. Один маленький шаг к финансовой цели сегодня — и энергия денег начнёт двигаться. Не жди момента."
+      }
+    ],
     "button": null,
     "pexels_query": "tarot cards gold coins abundance mystical aesthetic dark feminine",
     "photo_path": null
@@ -55,6 +84,7 @@
     "cta": "❤️ если сделаешь · 🔥 если уже делаешь · 💫 если хочешь попробовать",
     "interactive_type": "reactions",
     "reactions": ["❤️", "🔥", "💫"],
+    "choices": null,
     "button": null,
     "pexels_query": "candle flame ritual mystical dark aesthetic smoke",
     "photo_path": null
@@ -70,6 +100,7 @@
     "cta": "Нажми — карты ответят в личку 👇",
     "interactive_type": "button_prediction",
     "reactions": [],
+    "choices": null,
     "button": {"type": "button_cards", "label": "🔮 Карты отвечают"},
     "pexels_query": "tarot reading crystal ball mystical feminine dark aesthetic",
     "photo_path": null
@@ -85,6 +116,7 @@
     "cta": "❤️ если откликается · 🌙 если хочешь узнать больше",
     "interactive_type": "reactions",
     "reactions": ["❤️", "🌙"],
+    "choices": null,
     "button": null,
     "pexels_query": "tarot reader woman mystical aesthetic candle hands dark",
     "photo_path": null
@@ -100,6 +132,7 @@
     "cta": "Выбери реакцией:\n1️⃣ — первая · 2️⃣ — вторая · 3️⃣ — третья 👇",
     "interactive_type": "vote_123",
     "reactions": ["1️⃣", "2️⃣", "3️⃣"],
+    "choices": null,
     "button": null,
     "pexels_query": "three tarot cards face down choice mystical dark feminine",
     "photo_path": null
@@ -115,6 +148,7 @@
     "cta": "❤️ если совпало · 🌙 если хочешь больше таких практик",
     "interactive_type": "reactions",
     "reactions": ["❤️", "🌙"],
+    "choices": null,
     "button": null,
     "pexels_query": "tarot cards three reveal night candle glow mystical",
     "photo_path": null

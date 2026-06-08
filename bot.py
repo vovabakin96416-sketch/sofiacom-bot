@@ -196,11 +196,18 @@ async def send_post(bot, channel_id: str, post: dict) -> None:
     full  = f"*{title}*\n\n{text}\n\n{cta}".strip()
 
     keyboard = None
-    if post.get("interactive_type") == "button_prediction" and post.get("button"):
+    itype = post.get("interactive_type", "")
+    if itype == "button_prediction" and post.get("button"):
         btn = post["button"]
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton(btn["label"], callback_data=f"pred_{btn['type']}")
         ]])
+    elif itype == "button_choice" and post.get("choices"):
+        rows = [
+            [InlineKeyboardButton(c["label"], callback_data=f"choice_{post.get('id', 0)}_{i}")]
+            for i, c in enumerate(post["choices"])
+        ]
+        keyboard = InlineKeyboardMarkup(rows)
 
     # Приоритет: локальный файл → photo_url из json → Pexels по запросу
     photo_path = post.get("photo_path")
@@ -337,6 +344,32 @@ async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     lines.append(f"\n⏰ Авто-постинг: 10:00 МСК\nКанал: {CHANNEL_ID}")
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+# ─── Callback: button_choice — выбор карты/варианта → попап с ответом ────────
+async def choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    # callback_data формат: choice_<post_id>_<choice_index>
+    parts = query.data.split("_")
+    try:
+        post_id = int(parts[1])
+        idx     = int(parts[2])
+    except (IndexError, ValueError):
+        await query.answer("🔮", show_alert=False)
+        return
+
+    posts = load_content()
+    post  = next((p for p in posts if p.get("id") == post_id), None)
+    if not post:
+        await query.answer("🔮 Скоро раскрою...", show_alert=True)
+        return
+
+    choices = post.get("choices", [])
+    if idx < 0 or idx >= len(choices):
+        await query.answer("🔮", show_alert=True)
+        return
+
+    answer = choices[idx].get("answer", "🔮")
+    await query.answer(answer[:200], show_alert=True)
 
 # ─── Callback: кнопки предсказаний на постах канала ──────────────────────────
 async def prediction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -624,7 +657,7 @@ def main() -> None:
     # ConversationHandler — управление пулами через кнопки (только для admin)
     # Паттерн ^(?!pred_) — не захватывает кнопки предсказаний с постов
     conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_handler, pattern=r"^(?!pred_)")],
+        entry_points=[CallbackQueryHandler(button_handler, pattern=r"^(?!pred_|choice_)")],
         states={
             WAITING_TEXT:       [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_text)],
             WAITING_DELETE_NUM: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_delete_num)],
@@ -639,7 +672,8 @@ def main() -> None:
     app.add_handler(CommandHandler("testpost", cmd_testpost))  # тест конкретного поста по id
     app.add_handler(CommandHandler("post",     cmd_post))      # немедленный пост в основной канал
     app.add_handler(CommandHandler("schedule", cmd_schedule))  # план на неделю
-    # Кнопки предсказаний — перехватываем ДО conv
+    # Кнопки — перехватываем ДО conv
+    app.add_handler(CallbackQueryHandler(choice_callback,     pattern=r"^choice_"))
     app.add_handler(CallbackQueryHandler(prediction_callback, pattern=r"^pred_"))
     app.add_handler(conv)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
