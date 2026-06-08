@@ -546,7 +546,7 @@ def main() -> None:
     logger.info("APScheduler запущен ✅ (10:00 МСК ежедневно)")
 
     # ConversationHandler — управление пулами через кнопки (только для admin)
-    # Паттерн ^(?!pred_) — не захватывает кнопки предсказаний
+    # Паттерн ^(?!pred_) — не захватывает кнопки предсказаний с постов
     conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(button_handler, pattern=r"^(?!pred_)")],
         states={
@@ -562,7 +562,7 @@ def main() -> None:
     app.add_handler(CommandHandler("test",     cmd_test))      # тест-пост в тест-канал
     app.add_handler(CommandHandler("post",     cmd_post))      # немедленный пост в основной канал
     app.add_handler(CommandHandler("schedule", cmd_schedule))  # план на неделю
-    # Кнопки предсказаний — перехватываем ДО conv, чтобы они не попали в меню
+    # Кнопки предсказаний — перехватываем ДО conv
     app.add_handler(CallbackQueryHandler(prediction_callback, pattern=r"^pred_"))
     app.add_handler(conv)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
