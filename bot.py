@@ -234,6 +234,32 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         parse_mode="Markdown"
     )
 
+async def cmd_testpost(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Отправить конкретный пост по id в тестовый канал. Использование: /testpost 2"""
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text("Использование: /testpost <id>\nПример: /testpost 2")
+        return
+    try:
+        post_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("ID должен быть числом. Пример: /testpost 2")
+        return
+    posts = load_content()
+    found = next((p for p in posts if p.get("id") == post_id), None)
+    if not found:
+        ids = [p.get("id") for p in posts]
+        await update.message.reply_text(f"Пост с id={post_id} не найден.\nДоступные id: {ids}")
+        return
+    await send_post(context.bot, TEST_CHANNEL_ID, found)
+    await update.message.reply_text(
+        f"✅ Пост #{post_id} отправлен в {TEST_CHANNEL_ID}\n"
+        f"*{found.get('title', '—')}*\n"
+        f"Тип: `{found.get('interactive_type', '—')}`",
+        parse_mode="Markdown"
+    )
+
 async def cmd_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Немедленно отправить сегодняшний пост в основной канал."""
     if update.effective_user.id != ADMIN_ID:
@@ -581,7 +607,8 @@ def main() -> None:
 
     app.add_handler(CommandHandler("menu",     cmd_menu))
     app.add_handler(CommandHandler("start",    cmd_menu))
-    app.add_handler(CommandHandler("test",     cmd_test))      # тест-пост в тест-канал
+    app.add_handler(CommandHandler("test",     cmd_test))      # тест-пост сегодня → тест-канал
+    app.add_handler(CommandHandler("testpost", cmd_testpost))  # тест конкретного поста по id
     app.add_handler(CommandHandler("post",     cmd_post))      # немедленный пост в основной канал
     app.add_handler(CommandHandler("schedule", cmd_schedule))  # план на неделю
     # Кнопки предсказаний — перехватываем ДО conv
