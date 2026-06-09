@@ -301,7 +301,23 @@ async def scheduled_morning_post(app: Application) -> None:
     holiday = get_holiday_post()
     post    = holiday or get_post_for_today("morning")
     if not post:
-        logger.warning("Нет поста на сегодня (утро) — пропуск")
+        today    = datetime.now(tz=MSK).date()
+        start    = get_campaign_start()
+        delta    = (today - start).days
+        week_num = (delta // 7) % 4 + 1
+        day_name = DAYS_EN[today.weekday()]
+        msg = (
+            f"⚠️ Нет поста на сегодня (утро)\n"
+            f"Ищу: week={week_num}, day={day_name}\n"
+            f"CAMPAIGN_START={CAMPAIGN_START or 'не задан (=сегодня)'}\n\n"
+            f"Проверь content.json и CAMPAIGN_START в Railway"
+        )
+        logger.warning(msg)
+        if ADMIN_ID:
+            try:
+                await app.bot.send_message(chat_id=ADMIN_ID, text=msg)
+            except Exception as e:
+                logger.error(f"Не смог уведомить админа: {e}")
         return
     await request_approval(app, post, "morning")
     logger.info(f"📋 Утренний пост ожидает одобрения")
@@ -379,6 +395,33 @@ async def cmd_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"*{post.get('title', '—')}*",
         parse_mode="Markdown"
     )
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Диагностика: показать текущий расчёт недели и пост на сегодня."""
+    if update.effective_user.id != ADMIN_ID:
+        return
+    today    = datetime.now(tz=MSK)
+    start    = get_campaign_start()
+    delta    = (today.date() - start).days
+    week_num = (delta // 7) % 4 + 1
+    day_name = DAYS_EN[today.weekday()]
+    post_m   = get_post_for_today("morning")
+    post_e   = get_post_for_today("evening")
+    now_msk  = today.strftime("%Y-%m-%d %H:%M МСК")
+    msg = (
+        f"📊 *Статус бота*\n\n"
+        f"Время сейчас: `{now_msk}`\n"
+        f"CAMPAIGN_START: `{CAMPAIGN_START or 'не задан (=сегодня)'}`\n"
+        f"Дата кампании: `{start}`\n"
+        f"Дней от старта: `{delta}`\n"
+        f"Текущая неделя: `{week_num}` из 4\n"
+        f"День недели: `{day_name}`\n\n"
+        f"Утренний пост: {'✅ ' + post_m.get('title','?') if post_m else '❌ не найден'}\n"
+        f"Вечерний пост: {'✅ ' + post_e.get('title','?') if post_e else '➖ нет'}\n\n"
+        f"Каналы:\n  Основной: {CHANNEL_ID}\n  Тест: {TEST_CHANNEL_ID}\n"
+        f"Admin ID: {ADMIN_ID}"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Показать план постов на текущую неделю."""
@@ -745,6 +788,7 @@ def main() -> None:
         CronTrigger(hour=10, minute=0, timezone=MSK),
         args=[app],
         id="morning_post",
+        misfire_grace_time=7200,  # досылать если перезапустился в течение 2 часов
     )
     # Воскресный вечерний пост (ответы на карты)
     scheduler.add_job(
@@ -752,6 +796,7 @@ def main() -> None:
         CronTrigger(day_of_week="sun", hour=20, minute=0, timezone=MSK),
         args=[app],
         id="evening_post",
+        misfire_grace_time=7200,
     )
     scheduler.start()
     logger.info("APScheduler запущен ✅ (10:00 МСК ежедневно)")
@@ -774,6 +819,7 @@ def main() -> None:
     app.add_handler(CommandHandler("testpost", cmd_testpost))  # тест конкретного поста по id
     app.add_handler(CommandHandler("post",     cmd_post))      # немедленный пост в основной канал
     app.add_handler(CommandHandler("schedule", cmd_schedule))  # план на неделю
+    app.add_handler(CommandHandler("status",   cmd_status))    # диагностика
     # Кнопки — перехватываем ДО conv
     app.add_handler(CallbackQueryHandler(approval_callback,   pattern=r"^(approve|cancel)_"))
     app.add_handler(CallbackQueryHandler(choice_callback,     pattern=r"^choice_"))
