@@ -12,6 +12,7 @@ from pathlib import Path
 import pytz
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import BadRequest
 from telegram.ext import (
     Application, MessageHandler, CommandHandler,
     CallbackQueryHandler, ConversationHandler, filters, ContextTypes
@@ -207,6 +208,38 @@ def fetch_pexels_photo(query: str) -> str | None:
         logger.warning(f"Pexels error: {e}")
     return None
 
+# ─── Надёжная отправка: Markdown с откатом на простой текст ───────────────────
+async def safe_send(bot, chat_id, text, keyboard=None, photo=None) -> None:
+    """Отправляет с Markdown; если разметка ломается (напр. `_` в @канале) —
+    повторяет без parse_mode, чтобы сообщение всё равно дошло."""
+    try:
+        if photo is not None:
+            await bot.send_photo(chat_id=chat_id, photo=photo, caption=text,
+                                 parse_mode="Markdown", reply_markup=keyboard)
+        else:
+            await bot.send_message(chat_id=chat_id, text=text,
+                                   parse_mode="Markdown", reply_markup=keyboard)
+    except BadRequest as e:
+        if "parse" in str(e).lower() or "entit" in str(e).lower():
+            logger.warning(f"Markdown сломан → отправляю без разметки: {e}")
+            if photo is not None:
+                await bot.send_photo(chat_id=chat_id, photo=photo, caption=text,
+                                     reply_markup=keyboard)
+            else:
+                await bot.send_message(chat_id=chat_id, text=text,
+                                       reply_markup=keyboard)
+        else:
+            raise
+
+def _resolve_photo(post: dict):
+    """Возвращает фото для поста: bytes из локального файла, URL или None."""
+    photo_path = post.get("photo_path")
+    if photo_path and Path(photo_path).exists():
+        return Path(photo_path).read_bytes()
+    return post.get("photo_url") or (
+        fetch_pexels_photo(post["pexels_query"]) if post.get("pexels_query") else None
+    )
+
 # ─── Отправка поста в канал ───────────────────────────────────────────────────
 async def send_post(bot, channel_id: str, post: dict) -> None:
     title = post.get("title", "")
@@ -228,22 +261,7 @@ async def send_post(bot, channel_id: str, post: dict) -> None:
         ]
         keyboard = InlineKeyboardMarkup(rows)
 
-    # Приоритет: локальный файл → photo_url из json → Pexels по запросу
-    photo_path = post.get("photo_path")
-    photo_url  = post.get("photo_url") or (
-        fetch_pexels_photo(post["pexels_query"]) if post.get("pexels_query") else None
-    )
-
-    if photo_path and Path(photo_path).exists():
-        with open(photo_path, "rb") as f:
-            await bot.send_photo(chat_id=channel_id, photo=f, caption=full,
-                                 parse_mode="Markdown", reply_markup=keyboard)
-    elif photo_url:
-        await bot.send_photo(chat_id=channel_id, photo=photo_url, caption=full,
-                             parse_mode="Markdown", reply_markup=keyboard)
-    else:
-        await bot.send_message(chat_id=channel_id, text=full,
-                               parse_mode="Markdown", reply_markup=keyboard)
+    await safe_send(bot, channel_id, full, keyboard, _resolve_photo(post))
 
 # ─── Одобрение поста: превью → администратору ────────────────────────────────
 async def request_approval(app: Application, post: dict, slot: str) -> None:
@@ -279,19 +297,7 @@ async def request_approval(app: Application, post: dict, slot: str) -> None:
 
     pending_posts[slot] = post
 
-    photo_url  = post.get("photo_url")
-    photo_path = post.get("photo_path")
-
-    if photo_path and Path(photo_path).exists():
-        with open(photo_path, "rb") as f:
-            await app.bot.send_photo(chat_id=ADMIN_ID, photo=f, caption=caption,
-                                     parse_mode="Markdown", reply_markup=keyboard)
-    elif photo_url:
-        await app.bot.send_photo(chat_id=ADMIN_ID, photo=photo_url, caption=caption,
-                                 parse_mode="Markdown", reply_markup=keyboard)
-    else:
-        await app.bot.send_message(chat_id=ADMIN_ID, text=caption,
-                                   parse_mode="Markdown", reply_markup=keyboard)
+    await safe_send(app.bot, ADMIN_ID, caption, keyboard, _resolve_photo(post))
 
     logger.info(f"📋 Запрос одобрения [{slot}] отправлен администратору {ADMIN_ID}")
 
@@ -786,6 +792,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await msg.reply_text(response)
     logger.info(f"Ответил {name} | {key}")
 
+# ─── Глобальный обработчик ошибок ─────────────────────────────────────────────
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error("Исключение при обработке апдейта:", exc_info=context.error)
+    if ADMIN_ID:
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"⚠️ Ошибка бота:\n{type(context.error).__name__}: {context.error}"
+            )
+        except Exception:
+            pass
+
 # ─── Запуск ───────────────────────────────────────────────────────────────────
 def main() -> None:
     if BOT_TOKEN == "ВСТАВЬ_ТОКЕН_ЗДЕСЬ":
@@ -840,6 +858,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(prediction_callback, pattern=r"^pred_"))
     app.add_handler(conv)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_error_handler(error_handler)
 
     logger.info("Бот запущен ✅")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
