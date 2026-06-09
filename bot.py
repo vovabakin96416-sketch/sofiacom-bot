@@ -396,6 +396,19 @@ async def cmd_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         parse_mode="Markdown"
     )
 
+async def cmd_preview(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Запустить процесс одобрения для сегодняшнего поста (как автопостинг в 10:00)."""
+    if update.effective_user.id != ADMIN_ID:
+        return
+    post = get_post_for_today("morning")
+    if not post:
+        await update.message.reply_text(
+            "❌ Нет поста на сегодня в content.json.\nПроверь /status"
+        )
+        return
+    await request_approval(context.application, post, "morning")
+    await update.message.reply_text("📋 Превью с кнопками одобрения отправлено выше ☝️")
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Диагностика: показать текущий расчёт недели и пост на сегодня."""
     if update.effective_user.id != ADMIN_ID:
@@ -818,6 +831,7 @@ def main() -> None:
     app.add_handler(CommandHandler("test",     cmd_test))      # тест-пост сегодня → тест-канал
     app.add_handler(CommandHandler("testpost", cmd_testpost))  # тест конкретного поста по id
     app.add_handler(CommandHandler("post",     cmd_post))      # немедленный пост в основной канал
+    app.add_handler(CommandHandler("preview",  cmd_preview))   # пост с одобрением (как автопостинг)
     app.add_handler(CommandHandler("schedule", cmd_schedule))  # план на неделю
     app.add_handler(CommandHandler("status",   cmd_status))    # диагностика
     # Кнопки — перехватываем ДО conv
