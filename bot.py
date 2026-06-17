@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytz
 import requests
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.error import BadRequest, NetworkError
 from telegram.ext import (
     Application, MessageHandler, CommandHandler,
@@ -35,9 +35,10 @@ MSK = pytz.timezone("Europe/Moscow")
 TEXTS_FILE    = Path("texts.json")
 CONTENT_FILE  = Path("content.json")
 HOLIDAYS_FILE = Path("holidays.json")
+SETTINGS_FILE = Path("settings.json")
 
 # ─── Состояния диалога ────────────────────────────────────────────────────────
-WAITING_TEXT, WAITING_DELETE_NUM = range(2)
+WAITING_TEXT, WAITING_DELETE_NUM, WAITING_EDIT, WAITING_PHOTO = range(4)
 
 # ─── Кулдауны ─────────────────────────────────────────────────────────────────
 COOLDOWN_HOURS = 24
@@ -154,6 +155,39 @@ def load_texts() -> dict:
 
 def save_texts(data: dict) -> None:
     TEXTS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+# ─── Настройки бота (settings.json) ───────────────────────────────────────────
+# ⚠️ На эфемерном диске хостинга файл стирается при redeploy (как и texts.json).
+#    Постоянное хранилище — отдельный этап (см. план, п.3.2).
+DEFAULT_SETTINGS = {
+    "approval_enabled": True,   # ВКЛ = бот спрашивает одобрение перед публикацией
+    "comments_enabled": True,   # ВКЛ = бот отвечает на карта/кофе/руна в комментах
+    "post_time": "10:00",
+}
+
+def load_settings() -> dict:
+    if SETTINGS_FILE.exists():
+        try:
+            data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        for k, v in DEFAULT_SETTINGS.items():
+            data.setdefault(k, v)
+        return data
+    save_settings(dict(DEFAULT_SETTINGS))
+    return dict(DEFAULT_SETTINGS)
+
+def save_settings(data: dict) -> None:
+    SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+def get_setting(key: str):
+    return load_settings().get(key, DEFAULT_SETTINGS.get(key))
+
+def toggle_setting(key: str) -> bool:
+    data = load_settings()
+    data[key] = not data.get(key, DEFAULT_SETTINGS.get(key, False))
+    save_settings(data)
+    return data[key]
 
 # ─── Работа с content.json ────────────────────────────────────────────────────
 def load_content() -> list:
@@ -272,8 +306,36 @@ async def send_post(bot, channel_id: str, post: dict) -> None:
     await safe_send(bot, channel_id, full, keyboard, _resolve_photo(post))
 
 # ─── Одобрение поста: превью → администратору ────────────────────────────────
+def approval_keyboard(slot: str) -> InlineKeyboardMarkup:
+    """6 кнопок экрана проверки поста (план, раздел 9.6)."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Опубликовать",  callback_data=f"approve_{slot}"),
+         InlineKeyboardButton("🔄 Другое фото",   callback_data=f"aphoto_{slot}")],
+        [InlineKeyboardButton("✍️ Изменить текст", callback_data=f"aedit_{slot}"),
+         InlineKeyboardButton("🖼 Своё фото",      callback_data=f"aown_{slot}")],
+        [InlineKeyboardButton("⏭ Не сегодня",     callback_data=f"askip_{slot}"),
+         InlineKeyboardButton("❌ Отменить",       callback_data=f"cancel_{slot}")],
+    ])
+
+def _approval_caption(post: dict) -> str:
+    title = post.get("title", "")
+    text  = post.get("text", "")
+    cta   = post.get("cta", "")
+    itype = post.get("interactive_type", "")
+    full  = f"*{title}*\n\n{text}\n\n{cta}".strip()
+    return (
+        f"📋 *Одобри публикацию*\n\n"
+        f"{full}\n\n"
+        f"Тип: `{itype}` · Канал: {CHANNEL_ID}"
+    )[:1020]  # Telegram caption limit 1024
+
+async def send_approval_preview(bot, post: dict, slot: str) -> None:
+    """Отправить администратору превью поста с 6 кнопками. Кладёт черновик в pending_posts."""
+    pending_posts[slot] = post
+    await safe_send(bot, ADMIN_ID, _approval_caption(post), approval_keyboard(slot), _resolve_photo(post))
+
 async def request_approval(app: Application, post: dict, slot: str) -> None:
-    """Отправить предпросмотр поста администратору с кнопками одобрения."""
+    """Подготовить пост (подтянуть фото) и показать администратору превью на одобрение."""
     if not ADMIN_ID:
         await send_post(app.bot, CHANNEL_ID, post)
         return
@@ -286,27 +348,7 @@ async def request_approval(app: Application, post: dict, slot: str) -> None:
         if photo_url:
             post["photo_url"] = photo_url
 
-    title = post.get("title", "")
-    text  = post.get("text", "")
-    cta   = post.get("cta", "")
-    itype = post.get("interactive_type", "")
-    full  = f"*{title}*\n\n{text}\n\n{cta}".strip()
-
-    caption = (
-        f"📋 *Одобри публикацию*\n\n"
-        f"{full}\n\n"
-        f"Тип: `{itype}` · Канал: {CHANNEL_ID}"
-    )[:1020]  # Telegram caption limit 1024
-
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Опубликовать", callback_data=f"approve_{slot}"),
-        InlineKeyboardButton("❌ Отменить",     callback_data=f"cancel_{slot}"),
-    ]])
-
-    pending_posts[slot] = post
-
-    await safe_send(app.bot, ADMIN_ID, caption, keyboard, _resolve_photo(post))
-
+    await send_approval_preview(app.bot, post, slot)
     logger.info(f"📋 Запрос одобрения [{slot}] отправлен администратору {ADMIN_ID}")
 
 
@@ -333,15 +375,23 @@ async def scheduled_morning_post(app: Application) -> None:
             except Exception as e:
                 logger.error(f"Не смог уведомить админа: {e}")
         return
-    await request_approval(app, post, "morning")
-    logger.info(f"📋 Утренний пост ожидает одобрения")
+    if get_setting("approval_enabled"):
+        await request_approval(app, post, "morning")
+        logger.info("📋 Утренний пост ожидает одобрения")
+    else:
+        await send_post(app.bot, CHANNEL_ID, post)
+        logger.info("Проверка выкл — утренний пост опубликован сразу")
 
 async def scheduled_evening_post(app: Application) -> None:
     post = get_post_for_today("evening")
     if not post:
         return
-    await request_approval(app, post, "evening")
-    logger.info(f"📋 Вечерний пост ожидает одобрения")
+    if get_setting("approval_enabled"):
+        await request_approval(app, post, "evening")
+        logger.info("📋 Вечерний пост ожидает одобрения")
+    else:
+        await send_post(app.bot, CHANNEL_ID, post)
+        logger.info("Проверка выкл — вечерний пост опубликован сразу")
 
 # ─── Команды администратора ───────────────────────────────────────────────────
 async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -520,26 +570,54 @@ async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     action, slot = query.data.split("_", 1)  # approve_morning → ("approve", "morning")
-    post = pending_posts.pop(slot, None)
 
     async def edit_msg(text: str) -> None:
         try:
             await query.edit_message_caption(text, parse_mode="Markdown")
         except Exception:
-            await query.edit_message_text(text, parse_mode="Markdown")
+            try:
+                await query.edit_message_text(text, parse_mode="Markdown")
+            except Exception:
+                pass
 
     if action == "approve":
+        post = pending_posts.pop(slot, None)
         if not post:
             await edit_msg("❌ Пост уже обработан или не найден")
             return
         await send_post(context.bot, CHANNEL_ID, post)
-        title = post.get("title", "—")
-        await edit_msg(f"✅ *Опубликовано!*\n\n*{title}*\nКанал: {CHANNEL_ID}")
+        await edit_msg(f"✅ *Опубликовано!*\n\n*{post.get('title', '—')}*\nКанал: {CHANNEL_ID}")
         logger.info(f"✅ Пост [{slot}] одобрен → {CHANNEL_ID}")
-    else:  # cancel
-        title = post.get("title", "—") if post else "—"
-        await edit_msg(f"❌ *Отменено*\n\n*{title}*")
-        logger.info(f"❌ Пост [{slot}] отменён администратором")
+        return
+
+    if action == "aphoto":  # 🔄 Другое фото — перевыбрать и показать превью заново
+        post = pending_posts.get(slot)
+        if not post:
+            await edit_msg("❌ Пост уже обработан или не найден")
+            return
+        if post.get("pexels_query"):
+            new_photo = fetch_pexels_photo(post["pexels_query"])
+            if new_photo:
+                post["photo_url"]  = new_photo
+                post["photo_path"] = None
+        # старое сообщение убираем и шлём новое превью (надёжнее, чем редактировать медиа)
+        try:
+            await query.delete_message()
+        except Exception:
+            pass
+        await send_approval_preview(context.bot, post, slot)
+        return
+
+    if action == "askip":  # ⏭ Не сегодня
+        pending_posts.pop(slot, None)
+        await edit_msg("⏭ *Пропущено* — сегодня не публикуем.")
+        logger.info(f"⏭ Пост [{slot}] пропущен")
+        return
+
+    # cancel — ❌ Отменить
+    post = pending_posts.pop(slot, None)
+    await edit_msg(f"❌ *Отменено*\n\n*{post.get('title', '—') if post else '—'}*")
+    logger.info(f"❌ Пост [{slot}] отменён администратором")
 
 
 # ─── Callback: кнопки предсказаний на постах канала ──────────────────────────
@@ -573,8 +651,17 @@ async def prediction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ─── Клавиатуры меню ─────────────────────────────────────────────────────────
 def main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 Триггеры в комментах (карта/кофе/руна)", callback_data="menu_triggers")],
-        [InlineKeyboardButton("💫 Кнопки на постах (любовь/деньги/карты)", callback_data="menu_btns")],
+        [InlineKeyboardButton("📝 Тексты предсказаний", callback_data="menu_texts")],
+        [InlineKeyboardButton("🗓 Посты",               callback_data="menu_posts")],
+        [InlineKeyboardButton("⚙️ Настройки",           callback_data="menu_settings")],
+        [InlineKeyboardButton("📊 Статистика",          callback_data="menu_stats")],
+    ])
+
+def texts_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💬 Триггеры (карта/кофе/руна)",        callback_data="menu_triggers")],
+        [InlineKeyboardButton("💫 Кнопки постов (любовь/деньги/карты)", callback_data="menu_btns")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="back_main")],
     ])
 
 def triggers_keyboard() -> InlineKeyboardMarkup:
@@ -582,7 +669,7 @@ def triggers_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎴 «карта» — ответы на слово карта", callback_data="menu_karta")],
         [InlineKeyboardButton("☕ «кофе» — ответы на слово кофе",  callback_data="menu_kofe")],
         [InlineKeyboardButton("🌿 «руна» — ответы на слово руна",  callback_data="menu_runa")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="back_main")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="menu_texts")],
     ])
 
 def btn_texts_keyboard() -> InlineKeyboardMarkup:
@@ -590,8 +677,44 @@ def btn_texts_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("❤️ Что он чувствует", callback_data="menu_button_love")],
         [InlineKeyboardButton("💰 Денежный совет",   callback_data="menu_button_money")],
         [InlineKeyboardButton("🔮 Карты отвечают",   callback_data="menu_button_cards")],
-        [InlineKeyboardButton("◀️ Назад",            callback_data="back_main")],
+        [InlineKeyboardButton("◀️ Назад",            callback_data="menu_texts")],
     ])
+
+def posts_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Запланированные посты",   callback_data="posts_scheduled")],
+        [InlineKeyboardButton("👀 Предпросмотр следующего", callback_data="posts_preview")],
+        [InlineKeyboardButton("🕯 Праздничные посты",       callback_data="posts_holidays")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="back_main")],
+    ])
+
+def settings_menu_keyboard() -> InlineKeyboardMarkup:
+    s = load_settings()
+    approval = "ВКЛ ✅" if s.get("approval_enabled") else "ВЫКЛ ⏸"
+    comments = "ВКЛ ✅" if s.get("comments_enabled") else "ВЫКЛ 🔇"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"✅ Проверка постов: {approval}", callback_data="toggle_approval")],
+        [InlineKeyboardButton(f"💬 Комментарии: {comments}",     callback_data="menu_comments")],
+        [InlineKeyboardButton(f"⏰ Время постинга: {s.get('post_time', '10:00')}", callback_data="settings_time")],
+        [InlineKeyboardButton("📢 Каналы", callback_data="settings_channels")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="back_main")],
+    ])
+
+def comments_menu_keyboard() -> InlineKeyboardMarkup:
+    s = load_settings()
+    comments = "ВКЛ ✅" if s.get("comments_enabled") else "ВЫКЛ 🔇"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"💬 Отвечать в комментах: {comments}", callback_data="toggle_comments")],
+        [InlineKeyboardButton("🎴 Слова: карта, кофе, руна", callback_data="comments_words")],
+        [InlineKeyboardButton(f"⏱ Кулдаун: {COOLDOWN_HOURS} ч", callback_data="comments_cooldown")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="menu_settings")],
+    ])
+
+def section_back_keyboard(back_cb: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("◀️ Назад", callback_data=back_cb),
+        InlineKeyboardButton("🏠 Меню",  callback_data="back_main"),
+    ]])
 
 def key_menu_keyboard(key: str) -> InlineKeyboardMarkup:
     back_cb = "menu_btns" if key.startswith("button_") else "menu_triggers"
@@ -612,19 +735,90 @@ def back_keyboard(key: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🏠 Главное меню", callback_data="back_main")],
     ])
 
+# ─── Тексты экранов разделов ─────────────────────────────────────────────────
+def scheduled_posts_text() -> str:
+    posts    = load_content()
+    today    = datetime.now(tz=MSK).date()
+    start    = get_campaign_start()
+    week_num = ((today - start).days // 7) % 4 + 1
+    week_posts = [p for p in posts if p.get("week") == week_num]
+    if not week_posts:
+        return f"📋 Нет постов для недели {week_num}.\nВсего в файле: {len(posts)}."
+    day_labels = {
+        "monday": "ПН", "tuesday": "ВТ", "wednesday": "СР", "thursday": "ЧТ",
+        "friday": "ПТ", "saturday": "СБ", "sunday": "ВС",
+    }
+    lines = [f"📋 *Запланировано на неделю {week_num} из 4:*\n"]
+    for p in week_posts:
+        d    = day_labels.get(p.get("day", ""), p.get("day", "?"))
+        slot = "🌙" if p.get("slot") == "evening" else ""
+        lines.append(f"{d} {slot} {p.get('title', '—')}")
+    return "\n".join(lines)
+
+def holidays_text() -> str:
+    if not HOLIDAYS_FILE.exists():
+        return "🕯 Праздничных постов нет (файл holidays.json отсутствует)."
+    try:
+        hs = json.loads(HOLIDAYS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return "🕯 Не удалось прочитать holidays.json."
+    if not hs:
+        return "🕯 Список праздников пуст."
+    lines = ["🕯 *Праздничные посты:*\n"]
+    for h in hs:
+        lines.append(f"{h.get('date', '?')} · {h.get('name', '—')}")
+    return "\n".join(lines)
+
+def info_screen_text(data: str) -> str:
+    s = load_settings()
+    if data == "settings_time":
+        return (f"⏰ *Время постинга:* {s.get('post_time', '10:00')} МСК\n\n"
+                "Изменение времени — следующий этап.")
+    if data == "settings_channels":
+        return (f"📢 *Каналы:*\nОсновной: {CHANNEL_ID}\nТест: {TEST_CHANNEL_ID}")
+    if data == "comments_words":
+        return ("🎴 *Слова-триггеры:* карта, кофе, руна\n(+ названия карт и рун).\n\n"
+                "Изменение списка — следующий этап.")
+    if data == "comments_cooldown":
+        return f"⏱ *Кулдаун:* {COOLDOWN_HOURS} ч на человека на каждое слово отдельно."
+    return "—"
+
+async def stats_screen(query) -> None:
+    today    = datetime.now(tz=MSK)
+    start    = get_campaign_start()
+    week_num = ((today.date() - start).days // 7) % 4 + 1
+    post_m   = get_post_for_today("morning")
+    txt = (
+        "📊 *Статистика*\n\n"
+        f"Неделя: {week_num} из 4\n"
+        f"Пост на сегодня: {'✅ ' + post_m.get('title', '?') if post_m else '❌ нет'}\n"
+        f"Канал: {CHANNEL_ID}\n\n"
+        "Полный отчёт (просмотры/реакции) собирает analytics.py по понедельникам."
+    )
+    await query.edit_message_text(
+        txt, parse_mode="Markdown",
+        reply_markup=section_back_keyboard("back_main")
+    )
+
 # ─── Главное меню ─────────────────────────────────────────────────────────────
+MAIN_MENU_TEXT = (
+    "🎛 *Панель управления*\n\n"
+    "📝 *Тексты* — что бот отвечает на слова и кнопки\n"
+    "🗓 *Посты* — расписание и предпросмотр\n"
+    "⚙️ *Настройки* — проверка постов, комментарии\n"
+    "📊 *Статистика* — что сейчас\n\n"
+    "Выбери раздел:"
+)
+
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_admin(update):
-        await update.message.reply_text("❌ Нет доступа.")
+        if update.message:
+            await update.message.reply_text("❌ Нет доступа.")
         return
-    await update.message.reply_text(
-        "🎛 *Панель управления*\n\n"
-        "💬 *Триггеры* — тексты, которые бот пишет в ответ на слова в комментах (карта / кофе / руна)\n"
-        "💫 *Кнопки* — тексты, которые бот шлёт в личку когда подписчик жмёт кнопку в посте\n\n"
-        "Выбери раздел:",
-        parse_mode="Markdown",
-        reply_markup=main_menu_keyboard()
-    )
+    if update.message:
+        await update.message.reply_text(
+            MAIN_MENU_TEXT, parse_mode="Markdown", reply_markup=main_menu_keyboard()
+        )
 
 # ─── Обработчик кнопок меню (ConversationHandler) ────────────────────────────
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -639,9 +833,129 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if data == "back_main":
         await query.edit_message_text(
-            "🎛 *Панель управления*\n\nВыбери раздел:",
-            parse_mode="Markdown",
-            reply_markup=main_menu_keyboard()
+            MAIN_MENU_TEXT, parse_mode="Markdown", reply_markup=main_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    # ── Кнопки экрана проверки поста: правка текста / своё фото (вход в диалог) ──
+    if data.startswith("aedit_"):
+        slot = data[6:]
+        if slot not in pending_posts:
+            await query.answer("Пост уже обработан", show_alert=True)
+            return ConversationHandler.END
+        context.user_data["edit_slot"] = slot
+        await context.bot.send_message(
+            chat_id=query.from_user.id,
+            text="✍️ Пришли новый ТЕКСТ поста одним сообщением.\n/cancel — отмена."
+        )
+        return WAITING_EDIT
+
+    if data.startswith("aown_"):
+        slot = data[5:]
+        if slot not in pending_posts:
+            await query.answer("Пост уже обработан", show_alert=True)
+            return ConversationHandler.END
+        context.user_data["photo_slot"] = slot
+        await context.bot.send_message(
+            chat_id=query.from_user.id,
+            text="🖼 Пришли фото (как фотографию).\n/cancel — отмена."
+        )
+        return WAITING_PHOTO
+
+    # ── Разделы главного меню ──
+    if data == "menu_texts":
+        await query.edit_message_text(
+            "📝 *Тексты предсказаний*\n\n"
+            "💬 Триггеры — ответы на слова в комментах.\n"
+            "💫 Кнопки — что бот шлёт в личку по кнопке на посте.\n\n"
+            "Выбери раздел:",
+            parse_mode="Markdown", reply_markup=texts_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    if data == "menu_posts":
+        await query.edit_message_text(
+            "🗓 *Посты*\n\nУправление публикациями:",
+            parse_mode="Markdown", reply_markup=posts_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    if data == "menu_settings":
+        await query.edit_message_text(
+            "⚙️ *Настройки*\n\nНажми на пункт, чтобы переключить:",
+            parse_mode="Markdown", reply_markup=settings_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    if data == "menu_comments":
+        await query.edit_message_text(
+            "💬 *Ответы в комментариях*\n\n"
+            "Когда подписчик пишет слово (карта/кофе/руна) — бот отвечает предсказанием.",
+            parse_mode="Markdown", reply_markup=comments_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    if data == "menu_stats":
+        await stats_screen(query)
+        return ConversationHandler.END
+
+    # ── Переключатели ──
+    if data == "toggle_approval":
+        state = toggle_setting("approval_enabled")
+        note  = ("✅ Проверка ВКЛ — одобряешь каждый пост перед публикацией."
+                 if state else "⏸ Проверка ВЫКЛ — бот публикует посты сам, без одобрения.")
+        await query.edit_message_text(
+            f"⚙️ *Настройки*\n\n{note}",
+            parse_mode="Markdown", reply_markup=settings_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    if data == "toggle_comments":
+        state = toggle_setting("comments_enabled")
+        note  = ("✅ Бот отвечает на карта/кофе/руна в комментах."
+                 if state else "🔇 Ответы в комментах выключены.")
+        await query.edit_message_text(
+            f"💬 *Ответы в комментариях*\n\n{note}",
+            parse_mode="Markdown", reply_markup=comments_menu_keyboard()
+        )
+        return ConversationHandler.END
+
+    # ── Посты: подэкраны ──
+    if data == "posts_scheduled":
+        await query.edit_message_text(
+            scheduled_posts_text(), parse_mode="Markdown",
+            reply_markup=section_back_keyboard("menu_posts")
+        )
+        return ConversationHandler.END
+
+    if data == "posts_preview":
+        post = get_holiday_post() or get_post_for_today("morning")
+        if not post:
+            await query.edit_message_text(
+                "❌ Нет поста на сегодня в content.json.",
+                reply_markup=section_back_keyboard("menu_posts")
+            )
+        else:
+            await request_approval(context.application, post, "morning")
+            await query.edit_message_text(
+                "👀 Превью с кнопками отправлено отдельным сообщением ☝️",
+                reply_markup=section_back_keyboard("menu_posts")
+            )
+        return ConversationHandler.END
+
+    if data == "posts_holidays":
+        await query.edit_message_text(
+            holidays_text(), parse_mode="Markdown",
+            reply_markup=section_back_keyboard("menu_posts")
+        )
+        return ConversationHandler.END
+
+    # ── Информационные экраны (правка — следующий этап) ──
+    if data in ("settings_time", "settings_channels", "comments_words", "comments_cooldown"):
+        back = "menu_comments" if data.startswith("comments_") else "menu_settings"
+        await query.edit_message_text(
+            info_screen_text(data), parse_mode="Markdown",
+            reply_markup=section_back_keyboard(back)
         )
         return ConversationHandler.END
 
@@ -766,9 +1080,48 @@ async def receive_delete_num(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
     return ConversationHandler.END
 
+# ─── Правка поста на одобрении: новый текст ───────────────────────────────────
+async def receive_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not is_admin(update):
+        return ConversationHandler.END
+    slot = context.user_data.get("edit_slot")
+    post = pending_posts.get(slot) if slot else None
+    if not post:
+        if update.message:
+            await update.message.reply_text("Пост не найден — открой /preview заново.")
+        return ConversationHandler.END
+    if not update.message or not update.message.text:
+        return WAITING_EDIT
+    post["text"] = update.message.text.strip()
+    await update.message.reply_text("✍️ Текст обновлён. Вот новое превью:")
+    await send_approval_preview(context.bot, post, slot)
+    return ConversationHandler.END
+
+# ─── Правка поста на одобрении: своё фото ─────────────────────────────────────
+async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not is_admin(update):
+        return ConversationHandler.END
+    slot = context.user_data.get("photo_slot")
+    post = pending_posts.get(slot) if slot else None
+    if not post:
+        if update.message:
+            await update.message.reply_text("Пост не найден — открой /preview заново.")
+        return ConversationHandler.END
+    if not update.message or not update.message.photo:
+        if update.message:
+            await update.message.reply_text("Пришли именно фотографию.")
+        return WAITING_PHOTO
+    # file_id телеграма годится как photo для send_photo
+    post["photo_url"]  = update.message.photo[-1].file_id
+    post["photo_path"] = None
+    await update.message.reply_text("🖼 Фото обновлено. Вот новое превью:")
+    await send_approval_preview(context.bot, post, slot)
+    return ConversationHandler.END
+
 # ─── Отмена ───────────────────────────────────────────────────────────────────
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Отменено.", reply_markup=main_menu_keyboard())
+    if update.message:
+        await update.message.reply_text("Отменено.", reply_markup=main_menu_keyboard())
     return ConversationHandler.END
 
 # ─── Ответ в комментариях ─────────────────────────────────────────────────────
@@ -781,6 +1134,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     user = msg.from_user
     if user is None:
+        return
+    if not get_setting("comments_enabled"):
         return
     text = msg.text.strip()
     name = f"@{user.username}" if user.username else user.first_name
@@ -822,12 +1177,23 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             pass
 
 # ─── Запуск ───────────────────────────────────────────────────────────────────
+async def _post_init(app: Application) -> None:
+    """Регистрируем список команд → у поля ввода появляется кнопка «Меню»."""
+    await app.bot.set_my_commands([
+        BotCommand("menu",     "🎛 Панель управления"),
+        BotCommand("status",   "📊 Что сейчас (неделя, пост)"),
+        BotCommand("preview",  "👀 Пост на одобрение"),
+        BotCommand("post",     "✅ Опубликовать сейчас"),
+        BotCommand("schedule", "🗓 План недели"),
+        BotCommand("test",     "🧪 В тест-канал"),
+    ])
+
 def main() -> None:
     if BOT_TOKEN == "ВСТАВЬ_ТОКЕН_ЗДЕСЬ":
         logger.error("Токен не задан! Задай BOT_TOKEN в переменных окружения.")
         return
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(_post_init).build()
 
     # APScheduler — авто-постинг в 10:00 МСК ежедневно
     scheduler = AsyncIOScheduler(timezone=MSK)
@@ -852,10 +1218,12 @@ def main() -> None:
     # ConversationHandler — управление пулами через кнопки (только для admin)
     # Паттерн ^(?!pred_) — не захватывает кнопки предсказаний с постов
     conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_handler, pattern=r"^(?!pred_|choice_|approve_|cancel_)")],
+        entry_points=[CallbackQueryHandler(button_handler, pattern=r"^(?!pred_|choice_|approve_|cancel_|aphoto_|askip_)")],
         states={
             WAITING_TEXT:       [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_text)],
             WAITING_DELETE_NUM: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_delete_num)],
+            WAITING_EDIT:       [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_edit)],
+            WAITING_PHOTO:      [MessageHandler(filters.PHOTO, receive_photo)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
@@ -870,7 +1238,7 @@ def main() -> None:
     app.add_handler(CommandHandler("schedule", cmd_schedule))  # план на неделю
     app.add_handler(CommandHandler("status",   cmd_status))    # диагностика
     # Кнопки — перехватываем ДО conv
-    app.add_handler(CallbackQueryHandler(approval_callback,   pattern=r"^(approve|cancel)_"))
+    app.add_handler(CallbackQueryHandler(approval_callback,   pattern=r"^(approve|cancel|aphoto|askip)_"))
     app.add_handler(CallbackQueryHandler(choice_callback,     pattern=r"^choice_"))
     app.add_handler(CallbackQueryHandler(prediction_callback, pattern=r"^pred_"))
     app.add_handler(conv)
