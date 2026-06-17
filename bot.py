@@ -12,7 +12,7 @@ from pathlib import Path
 import pytz
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import BadRequest
+from telegram.error import BadRequest, NetworkError
 from telegram.ext import (
     Application, MessageHandler, CommandHandler,
     CallbackQueryHandler, ConversationHandler, filters, ContextTypes
@@ -41,19 +41,27 @@ WAITING_TEXT, WAITING_DELETE_NUM = range(2)
 
 # ─── Кулдауны ─────────────────────────────────────────────────────────────────
 COOLDOWN_HOURS = 24
-cooldowns:     dict[int, datetime]             = {}
+# Кулдаун триггеров — ОТДЕЛЬНО по каждому слову (карта/кофе/руна), чтобы один
+# человек мог получить и карту, и руну в течение суток (а не одно на всё).
+cooldowns:     dict[tuple[int, str], datetime] = {}
 cooldowns_btn: dict[tuple[int, str], datetime] = {}
 
 # ─── Очередь постов на одобрение ──────────────────────────────────────────────
 pending_posts: dict[str, dict] = {}  # slot ("morning"/"evening") → post dict
 
-def is_on_cooldown(user_id: int) -> bool:
-    last = cooldowns.get(user_id)
+def is_on_cooldown(user_id: int, key: str) -> bool:
+    last = cooldowns.get((user_id, key))
     return last is not None and datetime.now() - last < timedelta(hours=COOLDOWN_HOURS)
 
 def is_btn_on_cooldown(user_id: int, btn_type: str) -> bool:
     last = cooldowns_btn.get((user_id, btn_type))
     return last is not None and datetime.now() - last < timedelta(hours=COOLDOWN_HOURS)
+
+def is_admin(update: Update) -> bool:
+    """Безопасная проверка прав админа. `effective_user` может быть None
+    (анонимный админ, системное сообщение) — тогда False, без падения."""
+    user = update.effective_user
+    return user is not None and user.id == ADMIN_ID
 
 # ─── Паттерны триггеров ───────────────────────────────────────────────────────
 KARTA = re.compile(r"^\s*к+а+р+т[аы]?[!?.,…]?\s*$", re.IGNORECASE)
@@ -338,7 +346,7 @@ async def scheduled_evening_post(app: Application) -> None:
 # ─── Команды администратора ───────────────────────────────────────────────────
 async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Отправить сегодняшний пост в ТЕСТОВЫЙ канал для проверки."""
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update):
         await update.message.reply_text("❌ Нет доступа.")
         return
     post = get_post_for_today()
@@ -363,7 +371,7 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_testpost(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Отправить конкретный пост по id в тестовый канал. Использование: /testpost 2"""
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update):
         return
     if not context.args:
         await update.message.reply_text("Использование: /testpost <id>\nПример: /testpost 2")
@@ -389,7 +397,7 @@ async def cmd_testpost(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def cmd_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Немедленно отправить сегодняшний пост в основной канал."""
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update):
         return
     post = get_post_for_today()
     if not post:
@@ -404,7 +412,7 @@ async def cmd_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_preview(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Запустить процесс одобрения для сегодняшнего поста (как автопостинг в 10:00)."""
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update):
         return
     post = get_post_for_today("morning")
     if not post:
@@ -417,7 +425,7 @@ async def cmd_preview(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Диагностика: показать текущий расчёт недели и пост на сегодня."""
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update):
         return
     today    = datetime.now(tz=MSK)
     start    = get_campaign_start()
@@ -444,7 +452,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def cmd_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Показать план постов на текущую неделю."""
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update):
         return
     posts    = load_content()
     today    = datetime.now(tz=MSK).date()
@@ -508,7 +516,7 @@ async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     await query.answer()
 
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update):
         return
 
     action, slot = query.data.split("_", 1)  # approve_morning → ("approve", "morning")
@@ -606,7 +614,7 @@ def back_keyboard(key: str) -> InlineKeyboardMarkup:
 
 # ─── Главное меню ─────────────────────────────────────────────────────────────
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update):
         await update.message.reply_text("❌ Нет доступа.")
         return
     await update.message.reply_text(
@@ -623,7 +631,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     await query.answer()
 
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update):
         await query.edit_message_text("❌ Нет доступа.")
         return ConversationHandler.END
 
@@ -711,7 +719,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # ─── Ввод нового предсказания ─────────────────────────────────────────────────
 async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update):
         return ConversationHandler.END
     key      = context.user_data.get("add_key")
     new_text = update.message.text.strip()
@@ -732,7 +740,7 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 # ─── Ввод номера для удаления ─────────────────────────────────────────────────
 async def receive_delete_num(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if update.effective_user.id != ADMIN_ID:
+    if not is_admin(update):
         return ConversationHandler.END
     key = context.user_data.get("del_key")
     try:
@@ -768,10 +776,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     msg = update.message
     if not msg or not msg.text:
         return
-    if update.effective_chat.type == "private":
+    chat = update.effective_chat
+    if chat is None or chat.type == "private":
+        return
+    user = msg.from_user
+    if user is None:
         return
     text = msg.text.strip()
-    user = msg.from_user
     name = f"@{user.username}" if user.username else user.first_name
 
     if   KARTA.match(text):     key = "karta"
@@ -780,26 +791,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif CARD_NAME.match(text): key = "karta"  # жрица, солнце, луна и др. → карточный пул
     else: return
 
-    if is_on_cooldown(user.id):
+    if is_on_cooldown(user.id, key):
         return
 
     pool = load_texts().get(key, [])
     if not pool:
         return
 
-    cooldowns[user.id] = datetime.now()
+    cooldowns[(user.id, key)] = datetime.now()
     response = random.choice(pool).replace("{name}", name)
     await msg.reply_text(response)
     logger.info(f"Ответил {name} | {key}")
 
 # ─── Глобальный обработчик ошибок ─────────────────────────────────────────────
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error("Исключение при обработке апдейта:", exc_info=context.error)
+    err = context.error
+    # Временные сетевые ошибки (обрыв связи с Telegram, напр. httpx.ConnectError)
+    # — пишем только в лог, БЕЗ спама администратору в личку.
+    if isinstance(err, NetworkError):
+        logger.warning(f"Сетевая ошибка (пропускаю уведомление админу): {err}")
+        return
+    logger.error("Исключение при обработке апдейта:", exc_info=err)
     if ADMIN_ID:
         try:
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
-                text=f"⚠️ Ошибка бота:\n{type(context.error).__name__}: {context.error}"
+                text=f"⚠️ Ошибка бота:\n{type(err).__name__}: {err}"
             )
         except Exception:
             pass
